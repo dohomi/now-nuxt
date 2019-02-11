@@ -1,29 +1,30 @@
 const {
-    createLambda
-} = require('@now/build-utils/lambda.js');
-const download = require('@now/build-utils/fs/download.js');
-const FileFsRef = require('@now/build-utils/file-fs-ref.js');
-const FileBlob = require('@now/build-utils/file-blob');
-const path = require('path');
+  createLambda
+} = require('@now/build-utils/lambda.js')
+const download = require('@now/build-utils/fs/download.js')
+const FileFsRef = require('@now/build-utils/file-fs-ref.js')
+// const FileBlob = require('@now/build-utils/file-blob')
+const path = require('path')
 const {
-    readFile,
-    writeFile,
-    unlink
-} = require('fs.promised');
+  readFile,
+  writeFile,
+  unlink
+} = require('fs.promised')
 const {
-    runNpmInstall,
-    runPackageJsonScript,
-} = require('@now/build-utils/fs/run-user-scripts.js');
-const glob = require('@now/build-utils/fs/glob.js');
+  runNpmInstall,
+  runPackageJsonScript
+} = require('@now/build-utils/fs/run-user-scripts.js')
+const glob = require('@now/build-utils/fs/glob.js')
 const {
-    excludeFiles,
-    validateEntrypoint,
-    includeOnlyEntryDirectory,
-    moveEntryDirectoryToRoot,
-    excludeLockFiles,
-    normalizePackageJson,
-    onlyStaticDirectory
-} = require('./utils');
+  // excludeFiles,
+  validateEntrypoint,
+  includeOnlyEntryDirectory,
+  moveEntryDirectoryToRoot,
+  // excludeLockFiles,
+  normalizePackageJson,
+  excludeStaticDirectory,
+  onlyStaticDirectory
+} = require('./utils')
 
 /** @typedef { import('@now/build-utils/file-ref').Files } Files */
 /** @typedef { import('@now/build-utils/fs/download').DownloadedFiles } DownloadedFiles */
@@ -39,13 +40,13 @@ const {
  * Read package.json from files
  * @param {DownloadedFiles} files
  */
-async function readPackageJson(files) {
-    if (!files['package.json']) {
-        return {};
-    }
+async function readPackageJson (files) {
+  if (!files['package.json']) {
+    return {}
+  }
 
-    const packageJsonPath = files['package.json'].fsPath;
-    return JSON.parse(await readFile(packageJsonPath, 'utf8'));
+  const packageJsonPath = files['package.json'].fsPath
+  return JSON.parse(await readFile(packageJsonPath, 'utf8'))
 }
 
 /**
@@ -53,11 +54,11 @@ async function readPackageJson(files) {
  * @param {string} workPath
  * @param {Object} packageJson
  */
-async function writePackageJson(workPath, packageJson) {
-    await writeFile(
-        path.join(workPath, 'package.json'),
-        JSON.stringify(packageJson, null, 2),
-    );
+async function writePackageJson (workPath, packageJson) {
+  await writeFile(
+    path.join(workPath, 'package.json'),
+    JSON.stringify(packageJson, null, 2)
+  )
 }
 
 /**
@@ -65,189 +66,133 @@ async function writePackageJson(workPath, packageJson) {
  * @param {string} workPath
  * @param {string} token
  */
-async function writeNpmRc(workPath, token) {
-    await writeFile(
-        path.join(workPath, '.npmrc'),
-        `//registry.npmjs.org/:_authToken=${token}`,
-    );
+async function writeNpmRc (workPath, token) {
+  await writeFile(
+    path.join(workPath, '.npmrc'),
+    `//registry.npmjs.org/:_authToken=${token}`
+  )
 }
 
 exports.config = {
-    maxLambdaSize: '50mb',
-};
+  maxLambdaSize: '5mb'
+}
 
 /**
  * @param {BuildParamsType} buildParams
  * @returns {Promise<Files>}
  */
-exports.build = async ({
+exports.build = async ({files, workPath, entrypoint}) => {
+  console.log('entrypoint ', entrypoint)
+  validateEntrypoint(entrypoint)
+
+  console.log('downloading user files...')
+  const entryDirectory = path.dirname(entrypoint)
+  const filesOnlyEntryDirectory = includeOnlyEntryDirectory(
     files,
-    workPath,
-    entrypoint
-}) => {
-    console.log('entrypoint ', entrypoint);
-    validateEntrypoint(entrypoint);
+    entryDirectory
+  )
+  const filesWithEntryDirectoryRoot = moveEntryDirectoryToRoot(
+    filesOnlyEntryDirectory,
+    entryDirectory
+  )
 
-    console.log('downloading user files...');
-    const entryDirectory = path.dirname(entrypoint);
-    const filesOnlyEntryDirectory = includeOnlyEntryDirectory(
-        files,
-        entryDirectory,
-    );
-    const filesWithEntryDirectoryRoot = moveEntryDirectoryToRoot(
-        filesOnlyEntryDirectory,
-        entryDirectory,
-    );
-    const filesWithoutLockfiles = excludeLockFiles(filesWithEntryDirectoryRoot);
-    const downloadedFiles = await download(filesWithoutLockfiles, workPath);
 
-    console.log('normalizing package.json');
-    const packageJson = normalizePackageJson(
-        await readPackageJson(downloadedFiles),
-    );
-    console.log('normalized package.json result: ', packageJson);
-    await writePackageJson(workPath, packageJson);
+  // const filesWithoutLockfiles = excludeLockFiles(filesWithEntryDirectoryRoot)
+  // const downloadedFiles = await download(filesWithoutLockfiles, workPath)
 
-    if (process.env.NPM_AUTH_TOKEN) {
-        console.log('found NPM_AUTH_TOKEN in environment, creating .npmrc');
-        await writeNpmRc(workPath, process.env.NPM_AUTH_TOKEN);
-    }
+  // changed...
+  const filesWithoutStaticDirectory = excludeStaticDirectory(
+    filesWithEntryDirectoryRoot
+  )
+  const downloadedFiles = await download(filesWithoutStaticDirectory, workPath)
 
-    console.log('running npm install...');
-    await runNpmInstall(workPath, ['--prefer-offline']);
-    console.log('running user script...');
-    await runPackageJsonScript(workPath, 'now-build');
-    console.log('running npm install --production...');
-    await runNpmInstall(workPath, ['--prefer-offline', '--production']);
-    if (process.env.NPM_AUTH_TOKEN) {
-        await unlink(path.join(workPath, '.npmrc'));
-    }
+  console.log('normalizing package.json')
+  const packageJson = normalizePackageJson(
+    await readPackageJson(downloadedFiles)
+  )
+  console.log('normalized package.json result: ', packageJson)
+  await writePackageJson(workPath, packageJson)
 
-    const filesAfterBuild = await glob('**', workPath);
+  if (process.env.NPM_AUTH_TOKEN) {
+    console.log('found NPM_AUTH_TOKEN in environment, creating .npmrc')
+    await writeNpmRc(workPath, process.env.NPM_AUTH_TOKEN)
+  }
 
-    console.log('preparing lambda files...');
-    const dotNuxtServerRootFiles = await glob('.nuxt/dist/*', workPath);
-    const nodeModules = excludeFiles(
-        await glob('node_modules/**', workPath),
-        file => file.startsWith('node_modules/.cache'),
-    );
-    const launcherFiles = {
-        'now__bridge.js': new FileFsRef({
-            fsPath: require('@now/node-bridge')
-        }),
-    };
-    const nuxtFiles = {
-        ...nodeModules,
-        ...dotNuxtServerRootFiles,
-        ...launcherFiles,
-    };
-    if (filesAfterBuild['nuxt.config.js']) {
-        nuxtFiles['nuxt.config.js'] = filesAfterBuild['nuxt.config.js'];
-    }
-    const dist = await glob(
-        '**/!(pages)/*',
-        path.join(workPath, '.nuxt', 'dist'),
-    );
-    const pages = await glob(
-        '**/*.js',
-        path.join(workPath, '.nuxt', 'dist', 'client', 'pages'),
-    );
+  console.log('running npm install...')
+  await runNpmInstall(workPath, ['--prefer-offline'])
+  console.log('running user script...')
+  await runPackageJsonScript(workPath, 'now-build')
+  console.log('running npm install --production...')
+  await runNpmInstall(workPath, ['--prefer-offline', '--production'])
+  if (process.env.NPM_AUTH_TOKEN) {
+    await unlink(path.join(workPath, '.npmrc'))
+  }
 
-    const launcherPath = path.join(__dirname, 'launcher.js');
-    const launcherData = await readFile(launcherPath, 'utf8');
+  //////
+  const lambdas = {}
+  console.log('preparing lambda files...')
+  const launcherFiles = {
+    'now__bridge.js': new FileFsRef({fsPath: require('@now/node-bridge')}),
+    'now__launcher.js': new FileFsRef({
+      fsPath: path.join(__dirname, 'launcher.js')
+    })
+  }
+  const pages = await glob(
+    '**/*.js',
+    path.join(workPath, '.nuxt', 'dist', 'client', 'pages')
+  )
 
-    const lambdas = {};
-    await Promise.all(
-        Object.keys(pages).map(async (page) => {
+  const pageKeys = Object.keys(pages)
 
-            const pathname = page.replace(/\.js$/, '');
+  if (pageKeys.length === 0) {
+    throw new Error(
+      'No serverless pages were built. https://err.sh/zeit/now-builders/now-next-no-serverless-pages-built'
+    )
+  }
 
-            const pageFiles = {}
-            Object.keys(dist).forEach((file) => {
-                pageFiles[[`.nuxt/dist/${file}`]] = filesAfterBuild[`.nuxt/dist/${file}`]
-            })
+  await Promise.all(
+    pageKeys.map(async (page) => {
+      // These default pages don't have to be handled as they'd always 404
+      if (['_app.js', '_error.js', '_document.js'].includes(page)) {
+        return
+      }
 
-            pageFiles[[`.nuxt/dist/client/pages/${page}`]] = filesAfterBuild[
-                `.nuxt/dist/client/pages/${page}`
-            ]
+      const pathname = page.replace(/\.js$/, '')
 
-            console.log(`Creating lambda for page: "${page}"...`);
-            lambdas[path.join(entryDirectory, pathname)] = await createLambda({
-                files: {
-                    ...nuxtFiles,
-                    ...pageFiles,
-                    'now__launcher.js': new FileBlob({
-                        data: launcherData
-                    }),
-                },
-                handler: 'now__launcher.launcher',
-                runtime: 'nodejs8.10',
-            });
-            console.log(`Created lambda for page: "${page}"`);
-        }),
-    );
+      console.log(`Creating lambda for page: "${page}"...`)
+      lambdas[path.join(entryDirectory, pathname)] = await createLambda({
+        files: {
+          ...launcherFiles,
+          'page.js': pages[page]
+        },
+        handler: 'now__launcher.launcher',
+        runtime: 'nodejs8.10'
+      })
+      console.log(`Created lambda for page: "${page}"`)
+    })
+  )
 
-    const nuxtStaticFiles = await glob(
-        '**',
-        path.join(workPath, '.nuxt', 'dist', 'client'),
-    );
-    const staticFiles = Object.keys(nuxtStaticFiles).reduce(
-        (mappedFiles, file) => ({
-            ...mappedFiles,
-            [path.join(entryDirectory, `_nuxt/${file}`)]: nuxtStaticFiles[file],
-        }), {},
-    );
+  const nuxtStaticFiles = await glob(
+    '**',
+    path.join(workPath, '.nuxt', 'dist', 'client')
+  )
 
-    const nuxtStaticDirectory = onlyStaticDirectory(filesWithoutLockfiles);
-    const staticDirectoryFiles = Object.keys(nuxtStaticDirectory).reduce(
-        (mappedFiles, file) => ({
-            ...mappedFiles,
-            [path.join(entryDirectory, `${file.slice(6)}`)]: nuxtStaticDirectory[file],
-        }), {},
-    );
+  const staticFiles = Object.keys(nuxtStaticFiles).reduce(
+    (mappedFiles, file) => ({
+      ...mappedFiles,
+      [path.join(entryDirectory, `_nuxt/${file}`)]: nuxtStaticFiles[file]
+    }), {}
+  )
 
-    return { ...lambdas,
-        ...staticFiles,
-        ...staticDirectoryFiles
-    };
-};
 
-exports.prepareCache = async ({
-    files,
-    entrypoint,
-    cachePath,
-    workPath,
-}) => {
-    console.log('downloading user files...');
-    const entryDirectory = path.dirname(entrypoint);
-    const filesOnlyEntryDirectory = includeOnlyEntryDirectory(
-        files,
-        entryDirectory,
-    );
-    const filesWithEntryDirectoryRoot = moveEntryDirectoryToRoot(
-        filesOnlyEntryDirectory,
-        entryDirectory,
-    );
-    const filesWithoutLockfiles = excludeLockFiles(filesWithEntryDirectoryRoot);
-    await download(filesWithoutLockfiles, workPath);
-    await download(await glob('.nuxt/**', workPath), cachePath);
-    await download(await glob('node_modules/**', workPath), cachePath);
+  const nuxtStaticDirectory = onlyStaticDirectory(filesWithEntryDirectoryRoot)
+  const staticDirectoryFiles = Object.keys(nuxtStaticDirectory).reduce(
+    (mappedFiles, file) => ({
+      ...mappedFiles,
+      [path.join(entryDirectory, file)]: nuxtStaticDirectory[file]
+    }),
+    {}
+  )
 
-    console.log('.nuxt folder contents', await glob('.nuxt/**', cachePath));
-    console.log(
-        '.cache folder contents',
-        await glob('node_modules/.cache/**', cachePath),
-    );
-
-    console.log('running npm install...');
-    await runNpmInstall(cachePath);
-
-    return {
-        ...(await glob('.nuxt/server/index.spa.html', cachePath)),
-        ...(await glob('.nuxt/server/index.ssr.html', cachePath)),
-        ...(await glob('.nuxt/server/vue-ssr-client-manifest.json', cachePath)),
-        ...(await glob('.nuxt/server/server-bundle.json', cachePath)),
-        ...(await glob('node_modules/**', cachePath)),
-        ...(await glob('yarn.lock', cachePath)),
-    };
-};
+  return {...lambdas, ...staticFiles, ...staticDirectoryFiles}
+}

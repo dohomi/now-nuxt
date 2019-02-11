@@ -1,5 +1,5 @@
 const { Server } = require('http');
-const { Nuxt } = require('nuxt');
+const { Nuxt } = require('nuxt-start');
 const { Bridge } = require('./now__bridge.js');
 
 const bridge = new Bridge();
@@ -11,9 +11,7 @@ const config = require('./nuxt.config.js');
 config.dev = false;
 const nuxt = new Nuxt(config);
 
-const server = new Server((req, res) => {
-  nuxt.render(req, res);
-});
+const server = new Server(nuxt.render)
 server.listen(bridge.port);
 
 exports.launcher = bridge.launcher;
